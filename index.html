@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
+<title>Game Pesawat - Single File</title>
+<style>
+  :root{
+    --bg:#071028;
+    --panel:#0b2447;
+    --accent:#38b6ff;
+    --danger:#ff5c5c;
+    --muted:#9fb7d9;
+  }
+  html,body{
+    height:100%;
+    margin:0;
+    font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    background:linear-gradient(180deg,var(--bg),#021025);
+    color:#eaf6ff;
+    -webkit-user-select:none;
+    user-select:none;
+  }
+  #gameWrap{
+    max-width:900px;
+    margin:10px auto;
+    padding:12px;
+    box-sizing:border-box;
+  }
+  header{
+    display:flex;
+    gap:12px;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:8px;
+  }
+  .title{
+    font-weight:700;
+    font-size:18px;
+    display:flex;
+    gap:10px;
+    align-items:center;
+  }
+  .panel{
+    background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+    padding:8px 12px;
+    border-radius:10px;
+    display:flex;
+    gap:8px;
+    align-items:center;
+  }
+  #hud { display:flex; gap:10px; align-items:center; }
+  #hud .item{ font-size:14px; color:var(--muted); }
+  #canvasWrap{
+    position:relative;
+    border-radius:12px;
+    overflow:hidden;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.6);
+    background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.15));
+  }
+  canvas{ display:block; width:100%; height:auto; background:transparent; touch-action:none; }
+  /* touch controls */
+  .touch-controls{
+    position:absolute;
+    left:12px;
+    bottom:12px;
+    display:flex;
+    gap:8px;
+    z-index:50;
+  }
+  .touch-controls button{
+    background:rgba(255,255,255,0.06);
+    border:1px solid rgba(255,255,255,0.06);
+    color:var(--muted);
+    padding:12px 16px;
+    border-radius:10px;
+    font-weight:700;
+    font-size:16px;
+    backdrop-filter:blur(4px);
+  }
+  .touch-controls .fire{ background:linear-gradient(90deg,var(--accent),#68e0ff); color:#021025; border:none;}
+  #overlay{
+    position:absolute;
+    inset:0;
+    pointer-events:none;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    z-index:40;
+  }
+  .centerBox{
+    background:rgba(2,8,20,0.6);
+    padding:18px;
+    border-radius:10px;
+    text-align:center;
+    pointer-events:auto;
+  }
+  button.btn{
+    background:var(--panel);
+    color:var(--muted);
+    border:none;
+    padding:8px 12px;
+    border-radius:8px;
+    cursor:pointer;
+    font-weight:700;
+  }
+  .small{ font-size:13px; color:var(--muted); }
+  footer{ margin-top:8px; text-align:center; color:var(--muted); font-size:12px; }
+  @media (min-width:900px){
+    #gameWrap{ padding:18px; }
+    canvas{ height:600px; }
+  }
+</style>
+</head>
+<body>
+<div id="gameWrap">
+  <header>
+    <div class="title">
+      <div style="width:36px;height:36px;border-radius:8px;background:linear-gradient(90deg,var(--accent),#68e0ff);display:flex;align-items:center;justify-content:center;color:#021025;font-weight:900">✈</div>
+      <div>
+        <div style="font-size:15px">Game Pesawat</div>
+        <div class="small">SPCK — single file</div>
+      </div>
+    </div>
+    <div id="hud" class="panel">
+      <div class="item">Score: <span id="score">0</span></div>
+      <div class="item">Lives: <span id="lives">3</span></div>
+      <div class="item">Level: <span id="level">1</span></div>
+      <div style="margin-left:8px">
+        <button class="btn" id="pauseBtn">Pause</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="canvasWrap">
+    <canvas id="gameCanvas" width="720" height="480" aria-label="Game canvas"></canvas>
+
+    <div class="touch-controls" id="touchControls" style="display:none">
+      <button id="leftBtn">◀</button>
+      <button id="rightBtn">▶</button>
+      <button id="fireBtn" class="fire">FIRE</button>
+    </div>
+
+    <div id="overlay"></div>
+  </div>
+
+  <footer>
+    Kontrol: panah kiri/kanan atau tombol di layar. Shot = Space / FIRE.
+  </footer>
+</div>
+
+<script>
+/*
+  Simple Airplane Game
+  - One-file HTML/JS
+  - Keyboard and touch controls
+  - No external assets
+  - Designed to run in SPCK (mobile + desktop)
+*/
+
+/* ====== Globals & Canvas setup ====== */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d', { alpha: false }); // better perf
+let W = canvas.width, H = canvas.height;
+
+function resizeCanvasToDisplay() {
+  // keep internal pixels fixed for consistent physics, but scale CSS size
+  const containerWidth = canvas.parentElement.clientWidth;
+  const ratio = W / containerWidth;
+  canvas.style.width = containerWidth + 'px';
+  canvas.style.height = (H / ratio) + 'px';
+}
+window.addEventListener('resize', resizeCanvasToDisplay);
+resizeCanvasToDisplay();
+
+/* ====== Game state ====== */
+let state = {
+  running: true,
+  paused: false,
+  score: 0,
+  lives: 3,
+  level: 1,
+  time: 0
+};
+
+const UI = {
+  score: document.getElementById('score'),
+  lives: document.getElementById('lives'),
+  level: document.getElementById('level'),
+  pauseBtn: document.getElementById('pauseBtn'),
+  overlay: document.getElementById('overlay')
+};
+
+UI.pauseBtn.addEventListener('click', ()=>{ togglePause(); });
+
+/* ====== Player ====== */
+const player = {
+  x: W/2,
+  y: H - 60,
+  w: 42,
+  h: 28,
+  speed: 320,
+  cooldown: 0,
+  cooldownMax: 0.25, // seconds
+  color: '#87e0ff'
+};
+
+/* ====== Controls ====== */
+const keys = { left:false, right:false, fire:false };
+window.addEventListener('keydown', (e)=>{
+  if(e.key === 'ArrowLeft') keys.left = true;
+  if(e.key === 'ArrowRight') keys.right = true;
+  if(e.code === 'Space') keys.fire = true;
+  if(e.key === 'p' || e.key === 'P') togglePause();
+});
+window.addEventListener('keyup', (e)=>{
+  if(e.key === 'ArrowLeft') keys.left = false;
+  if(e.key === 'ArrowRight') keys.right = false;
+  if(e.code === 'Space') keys.fire = false;
+});
+
+/* Touch buttons for mobile */
+const touchControls = document.getElementById('touchControls');
+const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+if(isTouch) touchControls.style.display = 'flex';
+document.getElementById('leftBtn').addEventListener('touchstart', e=>{ e.preventDefault(); keys.left=true; });
+document.getElementById('leftBtn').addEventListener('touchend', e=>{ e.preventDefault(); keys.left=false; });
+document.getElementById('rightBtn').addEventListener('touchstart', e=>{ e.preventDefault(); keys.right=true; });
+document.getElementById('rightBtn').addEventListener('touchend', e=>{ e.preventDefault(); keys.right=false; });
+document.getElementById('fireBtn').addEventListener('touchstart', e=>{ e.preventDefault(); keys.fire=true; });
+document.getElementById('fireBtn').addEventListener('touchend', e=>{ e.preventDefault(); keys.fire=false; });
+
+/* ====== Bullets & Enemies ====== */
+const bullets = [];
+const enemies = [];
+
+function spawnEnemy() {
+  const size = 26 + Math.random()*30;
+  enemies.push({
+    x: 20 + Math.random() * (W - 40),
+    y: -size,
+    w: size,
+    h: size*0.7,
+    speed: 60 + Math.random()*80 + state.level*10,
+    hp: Math.ceil(1 + state.level/2),
+    color: '#ffb27a',
+    wobble: Math.random()*2
+  });
+}
+
+/* ====== Collision util ====== */
+function rectCollide(a,b){
+  return !(a.x + a.w < b.x || a.x > b.x + b.w || a.y + a.h < b.y || a.y > b.y + b.h);
+}
+
+/* ====== Audio (simple beeps) ====== */
+const AudioCtx = (window.AudioContext||window.webkitAudioContext) ? new (window.AudioContext||window.webkitAudioContext)() : null;
+function beep(freq=440, time=0.05, type='sine', volume=0.08){
+  if(!AudioCtx) return;
+  const o = AudioCtx.createOscillator();
+  const g = AudioCtx.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.value = volume;
+  o.connect(g); g.connect(AudioCtx.destination);
+  o.start();
+  o.stop(AudioCtx.currentTime + time);
+}
+
+/* ====== Game loop ====== */
+let last = performance.now();
+let spawnTimer = 0;
+function togglePause(){
+  state.paused = !state.paused;
+  UI.pauseBtn.textContent = state.paused ? 'Resume' : 'Pause';
+  showOverlay(state.paused ? 'Paused' : '');
+  if(!state.paused){
+    last = performance.now();
+    loop();
+  }
+}
+function showOverlay(text){
+  UI.overlay.innerHTML = text ? `<div class="centerBox"><h2 style="margin:6px 0">${text}</h2><div style="margin-top:8px"><button class="btn" onclick="restart()">Restart</button></div></div>` : '';
+}
+
+function restart(){
+  // reset
+  state.score = 0; state.lives = 3; state.level = 1; state.time = 0;
+  bullets.length = 0; enemies.length = 0;
+  player.x = W/2; player.cooldown = 0;
+  UI.score.textContent = state.score;
+  UI.lives.textContent = state.lives;
+  UI.level.textContent = state.level;
+  UI.overlay.innerHTML = '';
+  state.paused = false;
+  UI.pauseBtn.textContent = 'Pause';
+  last = performance.now();
+  loop();
+}
+function gameOver(){
+  showOverlay(`<div style="font-size:18px">Game Over</div><div style="margin-top:8px">Score: ${state.score}</div><div style="margin-top:12px"><button class="btn" onclick="restart()">Main Lagi</button></div>`);
+  beep(120,0.4,'sawtooth',0.12);
+  state.paused = true;
+}
+
+function loop(now){
+  if(state.paused) return;
+  requestAnimationFrame(loop);
+  const dt = (now - last) / 1000;
+  last = now;
+  update(dt);
+  render();
+}
+
+/* ====== Update ====== */
+function update(dt){
+  state.time += dt;
+  // spawn logic: spawn faster with level
+  spawnTimer += dt;
+  const spawnInterval = Math.max(0.3, 1.2 - state.level*0.08);
+  if(spawnTimer > spawnInterval){
+    spawnTimer = 0;
+    spawnEnemy();
+  }
+
+  // player movement
+  if(keys.left) player.x -= player.speed * dt;
+  if(keys.right) player.x += player.speed * dt;
+  // clamp
+  player.x = Math.max(8, Math.min(W - player.w - 8, player.x));
+
+  // shooting
+  player.cooldown = Math.max(0, player.cooldown - dt);
+  if(keys.fire && player.cooldown === 0){
+    bullets.push({ x: player.x + player.w/2 - 3, y: player.y - 8, w:6, h:10, speed: 520 });
+    player.cooldown = player.cooldownMax;
+    beep(900,0.04,'sine',0.06);
+  }
+
+  // bullets update
+  for(let i = bullets.length -1; i>=0; i--){
+    const b = bullets[i];
+    b.y -= b.speed * dt;
+    if(b.y + b.h < -10) bullets.splice(i,1);
+  }
+
+  // enemies update
+  for(let i = enemies.length -1; i>=0; i--){
+    const e = enemies[i];
+    e.y += e.speed * dt;
+    e.x += Math.sin((state.time + e.wobble) * 2) * (10 * Math.sin(e.wobble));
+    // collision with bullets
+    for(let j = bullets.length-1; j>=0; j--){
+      if(rectCollide(e, bullets[j])){
+        bullets.splice(j,1);
+        e.hp -= 1;
+        beep(1200,0.03,'square',0.05);
+        if(e.hp <= 0){
+          // kill
+          spawnExplosion(e.x + e.w/2, e.y + e.h/2);
+          state.score += 10 * state.level;
+          UI.score.textContent = state.score;
+          enemies.splice(i,1);
+          // level up small chance
+          if(state.score > state.level * 200){
+            state.level++;
+            UI.level.textContent = state.level;
+            beep(2200,0.08,'sine',0.08);
+          }
+        }
+        break;
+      }
+    }
+    // enemy reaching bottom or colliding with player
+    if(rectCollide(e, player) || e.y > H + 50){
+      if(rectCollide(e, player)){
+        state.lives -= 1;
+        UI.lives.textContent = state.lives;
+        spawnExplosion(player.x + player.w/2, player.y + player.h/2);
+        beep(160,0.25,'sawtooth',0.12);
+      }
+      enemies.splice(i,1);
+      if(state.lives <= 0){
+        gameOver();
+        return;
+      }
+    }
+  }
+}
+
+/* ====== Visual effects ====== */
+const explosions = [];
+function spawnExplosion(x,y){
+  explosions.push({ x, y, r:0, life:0.5 });
+}
+function updateExplosions(dt){
+  for(let i = explosions.length-1; i>=0; i--){
+    const ex = explosions[i];
+    ex.life -= dt;
+    ex.r += dt * 120;
+    if(ex.life <= 0) explosions.splice(i,1);
+  }
+}
+
+/* ====== Render ====== */
+function render(){
+  // clear
+  ctx.fillStyle = '#041426';
+  ctx.fillRect(0,0,W,H);
+
+  // starfield (simple parallax)
+  drawStars();
+
+  // enemies
+  enemies.forEach(e => drawEnemy(e));
+
+  // player
+  drawPlayer(player);
+
+  // bullets
+  bullets.forEach(b => {
+    ctx.fillStyle = '#fff';
+    roundRect(ctx, b.x, b.y, b.w, b.h, 2);
+    ctx.fill();
+  });
+
+  // explosions
+  updateExplosions(1/60);
+  explosions.forEach(ex => {
+    const alpha = Math.max(0, ex.life / 0.5);
+    const g = ctx.createRadialGradient(ex.x, ex.y, 0, ex.x, ex.y, ex.r);
+    g.addColorStop(0, `rgba(255,220,140,${alpha})`);
+    g.addColorStop(0.6, `rgba(255,90,60,${alpha*0.9})`);
+    g.addColorStop(1, `rgba(0,0,0,0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(ex.x, ex.y, ex.r, 0, Math.PI*2);
+    ctx.fill();
+  });
+}
+
+/* helper: rounded rect */
+function roundRect(ctx,x,y,w,h,r){
+  const rr = r||4;
+  ctx.beginPath();
+  ctx.moveTo(x+rr,y);
+  ctx.arcTo(x+w, y, x+w, y+h, rr);
+  ctx.arcTo(x+w, y+h, x, y+h, rr);
+  ctx.arcTo(x, y+h, x, y, rr);
+  ctx.arcTo(x, y, x+w, y, rr);
+  ctx.closePath();
+}
+
+/* draw player as a stylized plane */
+function drawPlayer(p){
+  ctx.save();
+  ctx.translate(p.x + p.w/2, p.y + p.h/2);
+
+  // body
+  ctx.fillStyle = player.color;
+  ctx.beginPath();
+  ctx.moveTo(-p.w/2, 0);
+  ctx.quadraticCurveTo(-p.w/4, -p.h, p.w/10, -p.h/2);
+  ctx.quadraticCurveTo(p.w/2, -p.h/4, p.w/2, 0);
+  ctx.quadraticCurveTo(p.w/2, p.h/4, p.w/10, p.h/2);
+  ctx.quadraticCurveTo(-p.w/4, p.h, -p.w/2, 0);
+  ctx.fill();
+
+  // cockpit
+  ctx.fillStyle = '#023047';
+  ctx.beginPath();
+  ctx.ellipse(p.w*0.12, 0, p.w*0.18, p.h*0.4, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.fillRect(-p.w/2 + 4, p.h/2 + 4, p.w - 8, 6);
+
+  ctx.restore();
+}
+
+/* draw an enemy as a rounded diamond */
+function drawEnemy(e){
+  ctx.save();
+  ctx.translate(e.x+e.w/2, e.y+e.h/2);
+  ctx.rotate(Math.sin((state.time+e.wobble)*3) * 0.15);
+  const w = e.w, h = e.h;
+  ctx.fillStyle = e.color;
+  ctx.beginPath();
+  ctx.moveTo(0, -h/2);
+  ctx.lineTo(w/2, 0);
+  ctx.lineTo(0, h/2);
+  ctx.lineTo(-w/2, 0);
+  ctx.closePath();
+  ctx.fill();
+
+  // eyes / detail
+  ctx.fillStyle = '#021025';
+  ctx.fillRect(-w*0.12, -h*0.08, w*0.24, h*0.16);
+  ctx.restore();
+}
+
+/* starfield */
+const stars = Array.from({length:60}, ()=>({ x: Math.random()*W, y: Math.random()*H, s: Math.random()*1.6 + 0.3, sp: Math.random()*10+6 }));
+function drawStars(){
+  ctx.fillStyle = '#041426';
+  // move slightly
+  for(const st of stars){
+    st.y += st.sp * 0.01 * state.level;
+    if(st.y > H) st.y = -2;
+    ctx.globalAlpha = Math.min(1, st.s/2 + 0.1);
+    ctx.fillStyle = '#8fcfff';
+    ctx.fillRect(st.x, st.y, st.s, st.s);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ====== Start game ====== */
+UI.score.textContent = state.score;
+UI.lives.textContent = state.lives;
+UI.level.textContent = state.level;
+
+last = performance.now();
+loop(last);
+
+/* Expose restart to window for overlay button */
+window.restart = restart;
+
+/* Prevent scrolling when touching the canvas on mobile */
+document.body.addEventListener('touchmove', function(e){
+  if(e.target.closest('#canvasWrap')) e.preventDefault();
+}, { passive: false });
+
+</script>
+</body>
+</html>
